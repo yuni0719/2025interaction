@@ -1,5 +1,5 @@
 //week02_2_myMusic
-//把 >akerUno_DefaultSketch 先複製過來
+//把 makerUno_DefaultSketch 先複製過來
 //把 setup() 裡的 for迴圈, copy到 void myMusic
 #define NOTE_C5 523
 #define NOTE_E5 659
