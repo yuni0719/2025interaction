@@ -7,9 +7,10 @@ void setup(){
 } //COM3 COM4 COM5 還是 COM6 要查你的電腦
 void mousePressed(){
   if(mouseButton==LEFT) myPort.write('b'); //用 USB 傳字母'b'
-  if(mouseButton==LEFT) myPort.write(' '); //用 USB 傳空白字母
+  if(mouseButton==RIGHT) myPort.write(' '); //用 USB 傳空白字母
 }
 void draw(){
   if(mousePressed) background(#FF0000);
   else background(#00FF00);
 }
+
