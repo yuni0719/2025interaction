@@ -8,8 +8,8 @@ void setup() {
 
 void loop() {
   delay(30); // 要慢一點, 不然 Processing會接不了
-  int x = analogRead(A2); //把搖桿的
-  int y = analogRead(A3); //把搖桿的
+  int x = analogRead(A2); //把搖桿的X接到A2
+  int y = analogRead(A3); //把搖桿的Y接到A3
   Serial.write(x/4); // 把 0 ~ 1023 變 0 ~ 255
   Serial.write(y/4);
   if (x > 900) tone(8, 784, 100);
