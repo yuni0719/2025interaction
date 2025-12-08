@@ -43,7 +43,7 @@ void draw() {
             // 2. 核心修正：死區檢查
             if (abs(x - CENTER_VALUE) > DEAD_ZONE) {
                // 數值在死區外：計算旋轉速度
-               rotationDelta = map(x, 0, 1023, -MAX_ROTATION_SPEED, MAX_ROTATION_SPEED);
+               rotationDelta = map(x, 0, 1023, MAX_ROTATION_SPEED, -MAX_ROTATION_SPEED);
             } else {
                // 數值在死區內：將速度設為 0
                rotationDelta = 0.0;
@@ -69,3 +69,4 @@ void draw() {
   rect(0, 0, 200, 200);
   popMatrix();
 }
+
