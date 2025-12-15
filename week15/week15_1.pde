@@ -1,0 +1,580 @@
+// 旋轉迷宮遊戲 + Arduino 搖桿
+// 核心功能：多關卡、高效單字節搖桿控制、穩定物理與碰撞
+// 新增功能：主頁/遊戲中雙音樂切換
+// 需在 data 資料夾中放入 bgm_menu.mp3、bgm_game.mp3、win_jingle.mp3
+// 點上面 Sketch -> Library -> Manage Libraries -> 搜尋 Minim -> install
+
+import processing.serial.*; // 導入 Serial 函式庫
+import ddf.minim.*;      // 導入 Minim 函式庫 (用於聲音處理)
+
+// --- 聲音變數 ---
+Minim minim;             // Minim 核心物件
+AudioPlayer bgmMenu;     // 主頁背景音樂 (BGM A)
+AudioPlayer bgmGame;     // 遊戲中背景音樂 (BGM B)
+AudioPlayer winJingle;   // 勝利音效
+
+// --- 遊戲狀態 ---
+int gameState = 0;   // 0=開始畫面, 1=遊戲中, 2=獲勝
+int currentLevel = 0; // 當前關卡（0-5）
+int totalLevels = 6;  // 總關卡數
+
+// --- 搖桿與旋轉控制變數 ---
+Serial port;
+float mazeAngle = 0;  // 迷宮旋轉角度
+float targetAngle = 0;  // 目標角度(用於平滑控制)
+
+// 搖桿中心點與死區設定 (基於 0-255 範圍)
+final int CENTER_VALUE_BYTE = 127; 
+final int DEAD_ZONE_BYTE = 15; // 搖桿靜止容許範圍
+final float MAX_ROTATION_SPEED_FROM_JOYSTICK = 0.08; // 旋轉靈敏度 (弧度/幀)
+
+
+// --- 球體與物理變數 ---
+float ballX, ballY;     // 球的位置
+float ballVX = 0, ballVY = 0; // 球的速度
+float ballRadius = 15;
+float gravity = 0.6;  // 重力
+float friction = 0.93;  // 摩擦力
+float maxRotation = 4.5;  // 最大旋轉角度限制 (弧度)
+
+int mazeSize = 500;
+int cellSize = 50;
+int cols, rows;
+
+// 6 個關卡的迷宮資料
+int[][][] levels = {
+  // 第 1 關 - 簡單直線
+  {
+    {1,1,1,1,1,1,1,1,1,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,0,1,1,1,1,1,1,0,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,1,1,1,0,1,1,1,1,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,0,1,1,1,1,1,1,0,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,0,1,1,1,1,1,1,0,1},
+    {1,1,1,1,1,1,1,1,1,1}
+  },
+  
+  // 第 2 關 - 你原本的迷宮
+  {
+    {1,1,1,1,1,1,1,1,1,1},
+    {1,0,0,0,1,0,0,0,0,1},
+    {1,0,1,0,1,0,1,1,0,1},
+    {1,0,1,0,0,0,1,0,0,1},
+    {1,0,1,1,1,0,1,0,1,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,1,1,0,1,1,1,1,0,1},
+    {1,0,0,0,0,0,0,1,0,1},
+    {1,0,1,1,1,1,0,0,0,1},
+    {1,1,1,1,1,1,1,1,1,1}
+  },
+  
+  // 第 3 關 - Z 字形
+  {
+    {1,1,1,1,1,1,1,1,1,1},
+    {1,0,1,1,1,1,1,1,0,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,0,1,1,1,1,1,1,1,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,1,1,1,1,1,1,1,0,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,0,1,1,1,1,1,1,1,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,1,1,1,1,1,1,1,1,1}
+  },
+  
+  // 第 4 關 - 螺旋
+  {
+    {1,1,1,1,1,1,1,1,1,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,0,1,1,1,1,1,1,0,1},
+    {1,0,1,0,0,0,0,1,0,1},
+    {1,0,1,0,1,1,0,1,0,1},
+    {1,0,1,0,1,0,0,1,0,1},
+    {1,0,1,0,0,0,1,1,0,1},
+    {1,0,1,1,1,1,1,1,0,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,1,1,1,1,1,1,1,1,1}
+  },
+  
+  // 第 5 關 - 狹窄通道
+  {
+    {1,1,1,1,1,1,1,1,1,1},
+    {1,0,1,0,1,0,1,0,1,1},
+    {1,0,1,0,1,0,1,0,0,1},
+    {1,0,0,0,1,0,1,1,0,1},
+    {1,1,0,1,1,0,0,0,0,1},
+    {1,0,0,0,0,0,1,1,0,1},
+    {1,0,1,1,0,1,1,0,0,1},
+    {1,0,1,0,0,0,0,0,1,1},
+    {1,0,0,0,1,1,1,0,0,1},
+    {1,1,1,1,1,1,1,1,1,1}
+  },
+  
+  // 第 6 關 - 終極挑戰
+  {
+    {1,1,1,1,1,1,1,1,1,1},
+    {1,0,0,0,1,0,0,0,0,1},
+    {1,0,1,0,1,0,1,1,0,1},
+    {1,0,1,0,0,0,1,0,0,1},
+    {1,0,1,1,1,1,1,0,1,1},
+    {1,0,0,0,0,0,0,0,0,1},
+    {1,1,1,1,0,1,1,1,0,1},
+    {1,0,0,0,0,1,0,0,0,1},
+    {1,0,1,1,0,0,0,1,0,1},
+    {1,1,1,1,1,1,1,1,1,1}
+  }
+};
+
+// 用函數取得當前關卡的迷宮
+int[][] getMaze() {
+  return levels[currentLevel];
+}
+float startX = 75;
+float startY = 75;
+float endX = 425;
+float endY = 425;
+
+PFont font;
+
+void setup() {
+  size(800, 800);
+  
+  // 設置當前迷宮的行/列數
+  cols = getMaze()[0].length; 
+  rows = getMaze().length;
+  ballX = startX;
+  ballY = startY;
+  
+  // 初始化 Serial 連線
+  try {
+    // 核心修正：強制連線 COM7
+    port = new Serial(this, "COM7", 9600); 
+    println("嘗試連接 COM7 埠...");
+  } catch (Exception e) {
+    println("錯誤：無法連接到 COM7。請檢查 Arduino 是否連線。");
+  }
+  
+  // Minim 聲音初始化
+  minim = new Minim(this);
+  try {
+      // 載入主選單音樂 (BGM A)
+      bgmMenu = minim.loadFile("bgm_menu.mp3");
+      // 載入遊戲中音樂 (BGM B)
+      bgmGame = minim.loadFile("bgm_game.mp3");
+      // 載入勝利音效 (Jingle)
+      winJingle = minim.loadFile("win_jingle.mp3");
+      
+      // 預設開始播放主選單音樂
+      bgmMenu.loop();
+      
+      println("所有聲音檔案載入成功。");
+  } catch (Exception e) {
+      println("警告：找不到音效檔案，聲音功能將失效。請檢查 data/ 資料夾。");
+  }
+  
+  // 設定支援中文的字體
+  font = createFont("Microsoft JhengHei", 32); 
+  textFont(font);
+}
+
+// 程式結束時停止聲音 (重要，避免資源佔用)
+void stop() {
+  if (bgmMenu != null) bgmMenu.close();
+  if (bgmGame != null) bgmGame.close();
+  if (winJingle != null) winJingle.close(); // 關閉 Jingle
+  if (minim != null) minim.stop();
+  super.stop();
+}
+
+// 聲音管理函式
+void handleMusicState() {
+  if (gameState == 0) { // 主頁
+      if (bgmGame != null && bgmGame.isPlaying()) bgmGame.pause();
+      if (bgmMenu != null && !bgmMenu.isPlaying()) bgmMenu.loop();
+  } else if (gameState == 1) { // 遊戲中
+      if (bgmMenu != null && bgmMenu.isPlaying()) bgmMenu.pause();
+      if (bgmGame != null && !bgmGame.isPlaying()) bgmGame.loop();
+  } else if (gameState == 2) { // 獲勝畫面 (總過關)
+      // 在 checkWin() 中已經處理了音效播放和 BGM 停止，此處只需確保不重新開始任何 BGM
+      if (bgmMenu != null && bgmMenu.isPlaying()) bgmMenu.pause();
+      if (bgmGame != null && bgmGame.isPlaying()) bgmGame.pause();
+  }
+}
+
+
+void draw() {
+  background(20);
+  
+  // 在 draw 迴圈一開始檢查並切換音樂狀態
+  handleMusicState();
+  
+  if (gameState == 0) {
+    drawStartScreen();
+  } else if (gameState == 1) {
+    drawGame();
+  } else if (gameState == 2) {
+    drawWinScreen();
+  }
+}
+
+// --- 遊戲核心迴圈 ---
+void drawGame() {
+  translate(width/2, height/2);
+  
+  // 改動：將搖桿輸入整合到 targetAngle 的計算中
+  handleSerialInput();
+  
+  // 平滑旋轉過渡 (使用搖桿設定的 targetAngle)
+  mazeAngle = lerp(mazeAngle, targetAngle, 0.15);
+  
+  rotate(mazeAngle);
+  
+  drawMaze();  
+  updateBall();
+  drawStartEnd();
+  drawBall();
+  checkWin();
+  
+  rotate(-mazeAngle); // 旋轉回來繪製 UI
+  
+  // 顯示控制資訊
+  fill(255);
+  textAlign(LEFT);
+  textSize(16);
+  text("搖桿 X: 傾斜迷宮", -380, -360);
+  text("R: 重置", -380, -335);
+  text("角度: " + nf(degrees(mazeAngle), 1, 1) + "°", -380, -310);
+  text("關卡: " + (currentLevel + 1) + " / " + totalLevels, -380, -285);
+  
+  // 提示文字
+  textAlign(RIGHT);
+  fill(0, 255, 0);
+  text("綠色方塊 = 起點", 380, -360);
+  fill(255, 0, 0);
+  text("紅色方塊 = 終點", 380, -335);
+}
+
+// --- 搖桿輸入處理函式 (V9 移植自 V8) ---
+void handleSerialInput() {
+  
+  if (port != null) { // 確保埠已連接
+    // 關鍵修正：只讀取最新的數據，丟棄舊數據
+    while (port.available() > 1) { // 如果數據多於 1 Byte (即舊數據)，先讀掉它
+        port.read();
+    }
+    
+    // 讀取最新的單個 Byte 數據 (0-255)
+    if (port.available() > 0) {
+        int xByte = port.read(); 
+        
+        // 檢查讀值是否有效 (單字節範圍)
+        if (xByte >= 0 && xByte <= 255) {
+          
+          // 核心修正：死區檢查 (使用 0-255 的中心點)
+          if (abs(xByte - CENTER_VALUE_BYTE) > DEAD_ZONE_BYTE) {
+             
+             // 數值在死區外：計算旋轉速度
+             // 關鍵修正：反轉映射範圍 (已確認的方向)
+             float mappedSpeed = map(xByte, 0, 255, -MAX_ROTATION_SPEED_FROM_JOYSTICK, MAX_ROTATION_SPEED_FROM_JOYSTICK);
+             
+             // 更新 targetAngle：將映射的速度持續加到目標角度上
+             targetAngle += mappedSpeed;
+             
+             // 限制最大旋轉角度
+             targetAngle = constrain(targetAngle, -maxRotation, maxRotation);
+          } 
+          // 搖桿在死區內時，targetAngle 維持不變，實現靜止
+        }
+    }
+  }
+}
+
+// --- 物理更新 ---
+void updateBall() {
+  // 重力方向：相對於迷宮傾斜。
+  float gravX = sin(mazeAngle) * gravity;
+  float gravY = cos(mazeAngle) * gravity;
+  
+  ballVX += gravX;
+  ballVY += gravY;
+  ballVX *= friction;
+  ballVY *= friction;
+  
+  float oldX = ballX;
+  float oldY = ballY;
+  
+  // 分開處理 X 和 Y 的碰撞 (優化碰撞處理，防止球卡牆)
+  ballX += ballVX;
+  if (checkCollision(ballX, ballY)) {
+    ballX = oldX;
+    ballVX *= -0.2;
+  }
+  
+  ballY += ballVY;
+  if (checkCollision(ballX, ballY)) {
+    ballY = oldY;
+    ballVY *= -0.2;
+  }
+  
+  // 限制球在迷宮範圍內
+  ballX = constrain(ballX, ballRadius, mazeSize - ballRadius);
+  ballY = constrain(ballY, ballRadius, mazeSize - ballRadius);
+}
+
+// --- 關卡與碰撞相關函式 ---
+
+void drawMaze() {
+  stroke(200);
+  strokeWeight(2);
+  fill(80);
+  
+  // 繪製當前關卡的迷宮牆壁
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < cols; j++) {
+      if (getMaze()[i][j] == 1)  {
+        float x = j * cellSize - mazeSize/2;
+        float y = i * cellSize - mazeSize/2;
+        rect(x, y, cellSize, cellSize);
+      }
+    }
+  }
+  
+  // 繪製外框
+  noFill();
+  stroke(255);
+  strokeWeight(4);
+  rect(-mazeSize/2, -mazeSize/2, mazeSize, mazeSize);
+}
+
+boolean checkCollision(float x, float y) {
+  int checkPoints = 8;
+  for (int i = 0; i < checkPoints; i++) {
+    float angle = TWO_PI * i / checkPoints;
+    float checkX = x + cos(angle) * ballRadius;
+    float checkY = y + sin(angle) * ballRadius;
+    
+    int col = int(checkX / cellSize);
+    int row = int(checkY / cellSize);
+    
+    if (row >= 0 && row < rows && col >= 0 && col < cols) {
+      // 使用 getMaze() 檢查當前關卡的牆壁
+      if (getMaze()[row][col] == 1) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void checkWin() {
+  float d = dist(ballX, ballY, endX, endY);
+  if (d < 25) {
+    // 成功抵達終點
+    
+    // 檢查是否為最終關卡過關
+    if (currentLevel + 1 >= totalLevels) {
+      // 最終關卡過關
+      gameState = 2;  // 全部過關
+
+      // 停止遊戲音樂
+      if (bgmGame != null && bgmGame.isPlaying()) bgmGame.pause();
+
+      // 播放勝利音效
+      if (winJingle != null) {
+          winJingle.rewind(); // 確保從頭播放
+          winJingle.play();
+      }
+      
+    } else {
+      // 進入下一關 (非最終過關)
+      currentLevel++;  
+      resetGame();  // 重置，開始下一關
+    }
+  }
+}
+
+// --- 遊戲狀態畫面函式 (保持原樣) ---
+
+void drawStartScreen() {
+  textAlign(CENTER, CENTER);
+  
+  // 標題
+  fill(255, 200, 0);
+  textSize(60);
+  text("旋轉迷宮", width/2, 120);
+  
+  // 遊戲規則
+  fill(255);
+  textSize(24);
+  text("遊戲規則", width/2, 200);
+  
+  textSize(30);
+  fill(200);
+  // 修改為搖桿控制
+  text("1. 使用搖桿 X 軸控制迷宮傾斜角度", width/2, 250); 
+  text("2. 讓黃色球從綠色起點滾到紅色終點", width/2, 300);
+  text("3. 按 R 鍵可以隨時重置", width/2, 350);
+  
+  // 圖示說明
+  fill(255);
+  textSize(20);
+  text("圖示說明", width/2, 420);
+  
+  // 綠色方塊 - 起點
+  fill(0, 255, 0);
+  noStroke();
+  rectMode(CENTER);
+  rect(width/2 - 100, 490, 35, 35);
+  fill(255);
+  textSize(18);
+  text("起點", width/2 - 100, 535);
+  
+  // 紅色方塊 - 終點
+  fill(255, 0, 0);
+  rect(width/2 + 100, 490, 35, 35);
+  fill(255);
+  text("終點", width/2 + 100, 535);
+  rectMode(CORNER);
+  
+  // 黃色球
+  fill(255, 200, 0);
+  noStroke();
+  ellipse(width/2, 600, 30, 30);
+  fill(255);
+  textSize(18);
+  text("你的球", width/2, 645);
+  
+  // 開始提示 - 閃爍效果
+  if (frameCount % 60 < 30) {
+    fill(255, 255, 0);
+    textSize(32);
+    text("按 Enter鍵 開始遊戲", width/2, 720);
+  } else {
+    fill(255, 255, 0, 150);
+    textSize(28);
+    text("按 Enter 鍵 開始遊戲", width/2, 720);
+  }
+}
+
+void drawStartEnd() {
+  // 起點 - 綠色方塊
+  fill(0, 255, 0);
+  stroke(255);
+  strokeWeight(2);
+  rectMode(CENTER);
+  rect(startX - mazeSize/2, startY - mazeSize/2, 35, 35);
+  
+  // 終點 - 紅色方塊
+  fill(255, 0, 0);
+  rect(endX - mazeSize/2, endY - mazeSize/2, 35, 35);
+  rectMode(CORNER);
+}
+
+void drawBall() {
+  fill(255, 200, 0);
+  stroke(255, 150, 0);
+  strokeWeight(2);
+  ellipse(ballX - mazeSize/2, ballY - mazeSize/2, ballRadius * 2, ballRadius * 2);
+}
+
+void drawWinScreen() {
+  textAlign(CENTER, CENTER);
+  
+  // 勝利標題
+  fill(255, 215, 0);
+  textSize(80);
+  text("恭喜過關!", width/2, 200);
+  fill(255);
+  textSize(40);
+  text("完成 " + totalLevels + " 個關卡！", width/2, 280);
+  // 星星效果
+  for (int i = 0; i < 50; i++) {
+    float x = random(width);
+    float y = random(height);
+    float size = random(2, 8);
+    fill(255, 255, 0, random(100, 255));
+    noStroke();
+    star(x, y, size);
+  }
+  
+  // 重新開始提示
+  fill(255);
+  textSize(32);
+  text("按 Enter 再玩一次", width/2, 500);
+  text("按 M 回到主選單", width/2, 550);
+  
+  if (frameCount % 40 < 20) {
+    fill(255, 255, 0);
+    textSize(36);
+    text("你贏了!", width/2, 350);
+  }
+}
+
+void star(float x, float y, float size) {
+  beginShape();
+  for (int i = 0; i < 5; i++) {
+    float angle = TWO_PI * i / 5 - PI/2;
+    float sx = x + cos(angle) * size;
+    float sy = y + sin(angle) * size;
+    vertex(sx, sy);
+    angle += PI / 5;
+    sx = x + cos(angle) * size/2;
+    sy = y + sin(angle) * size/2;
+    vertex(sx, sy);
+  }
+  endShape(CLOSE);
+}
+
+void resetGame() {
+  ballX = startX;
+  ballY = startY;
+  ballVX = 0;
+  ballVY = 0;
+  mazeAngle = 0;
+  targetAngle = 0;
+  
+  // 確保在切換關卡時，迷宮的行/列數是正確的
+  cols = getMaze()[0].length; 
+  rows = getMaze().length;
+}
+void fullReset() {
+  resetGame();
+  currentLevel = 0;  // 回到第一關
+}
+
+void keyPressed() {
+  // println("按鍵偵測: key=" + key + " keyCode=" + keyCode + " gameState=" + gameState); // 移除偵錯輸出
+  
+  // 開始畫面 - 按Enter開始
+  if (gameState == 0) {
+    if (key == ' ' || keyCode == 32 || key == ENTER || keyCode == ENTER) {
+      gameState = 1;
+      resetGame();
+    }
+  }
+  
+  // 遊戲中的控制
+  else if (gameState == 1) {
+    // 移除所有鍵盤傾斜控制，僅保留重置功能
+    
+    if (key == 'r' || key == 'R') {
+      resetGame();
+    }
+  }
+  
+  // 勝利畫面
+  else if (gameState == 2) {
+    if (key == ENTER) {
+      gameState = 1;
+      fullReset();
+    }
+    if (key == 'm' || key == 'M') {
+      key = 0;  // 防止關閉視窗
+      gameState = 0;
+      fullReset(); // 回到主選單並重置關卡
+    }
+  }
+}
