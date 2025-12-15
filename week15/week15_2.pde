@@ -1,13 +1,8 @@
-/**
- * 旋轉迷宮遊戲 V11 - 最終整合版 (多關卡, 搖桿, 音效)
- * 核心功能：多關卡管理、高效單字節搖桿控制、穩定物理與碰撞。
- * 新增功能：主頁/遊戲中 雙音樂切換、最終勝利音效。
- * 優化：移除關卡過渡延遲，實現快速切關。
- * * 硬體要求：
- * 1. Arduino 必須運行 Serial.write(x/4) 的程式 (高效單字節輸出)。
- * 2. Processing 必須安裝 Minim 函式庫。
- * 3. data/ 資料夾中須放入 bgm_menu.mp3, bgm_game.mp3, win_jingle.mp3。
- */
+// 旋轉迷宮遊戲 + Arduino 搖桿
+// 核心功能：多關卡、高效單字節搖桿控制、穩定物理與碰撞
+// 新增功能：主頁/遊戲中雙音樂切換
+// 需在 data 資料夾中放入 bgm_menu.mp3、bgm_game.mp3、win_jingle.mp3
+// 點上面 Sketch -> Library -> Manage Libraries -> 搜尋 Minim -> install
 
 import processing.serial.*; // 導入 Serial 函式庫
 import ddf.minim.*;      // 導入 Minim 函式庫 (用於聲音處理)
@@ -778,3 +773,4 @@ void keyPressed() {
     }
   }
 }
+
